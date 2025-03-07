@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using AITrader.Core.Models;
 using AITrader.Core.Services.RealTimeTrading;
 using AITrader.UI.Commands;
+using MaterialDesignThemes.Wpf;
 
 namespace AITrader.UI.ViewModels.RealTimeTrading
 {
@@ -78,6 +79,13 @@ namespace AITrader.UI.ViewModels.RealTimeTrading
             get => _lastTimestamp;
             set => SetProperty(ref _lastTimestamp, value);
         }
+        
+        private DateTime _timestamp;
+        public DateTime Timestamp
+        {
+            get => _timestamp;
+            set => SetProperty(ref _timestamp, value);
+        }
 
         private double _lastPrice;
         public double LastPrice
@@ -128,6 +136,14 @@ namespace AITrader.UI.ViewModels.RealTimeTrading
         {
             get => _errorMessage;
             set => SetProperty(ref _errorMessage, value);
+        }
+        
+        // Snackbar message queue for error messages
+        private MaterialDesignThemes.Wpf.SnackbarMessageQueue _snackbarMessageQueue = new MaterialDesignThemes.Wpf.SnackbarMessageQueue(TimeSpan.FromSeconds(3));
+        public MaterialDesignThemes.Wpf.SnackbarMessageQueue SnackbarMessageQueue
+        {
+            get => _snackbarMessageQueue;
+            set => SetProperty(ref _snackbarMessageQueue, value);
         }
 
         /// <summary>
@@ -188,6 +204,7 @@ namespace AITrader.UI.ViewModels.RealTimeTrading
                             App.Current.Dispatcher.Invoke(() => {
                                 ErrorMessage = "Inicialización incompleta. El sistema puede funcionar con capacidades limitadas.";
                                 AddStatusMessage("Error: " + ErrorMessage);
+                                SnackbarMessageQueue.Enqueue(ErrorMessage);
                                 IsLoading = false;
                             });
                         }
@@ -208,6 +225,7 @@ namespace AITrader.UI.ViewModels.RealTimeTrading
                         App.Current.Dispatcher.Invoke(() => {
                             ErrorMessage = $"Error de inicialización: {ex.Message}";
                             AddStatusMessage("Error: " + ErrorMessage);
+                            SnackbarMessageQueue.Enqueue(ErrorMessage);
                             IsLoading = false;
                         });
                     }
@@ -302,6 +320,7 @@ namespace AITrader.UI.ViewModels.RealTimeTrading
                 {
                     ErrorMessage = "Failed to start trading service.";
                     AddStatusMessage("Error: " + ErrorMessage);
+                    SnackbarMessageQueue.Enqueue(ErrorMessage);
                     return;
                 }
 
@@ -313,6 +332,7 @@ namespace AITrader.UI.ViewModels.RealTimeTrading
                 ErrorMessage = $"Error starting trading: {ex.Message}";
                 _logger.LogError(ex, "Error starting trading service");
                 AddStatusMessage("Error: " + ErrorMessage);
+                SnackbarMessageQueue.Enqueue(ErrorMessage);
             }
             finally
             {
@@ -340,6 +360,7 @@ namespace AITrader.UI.ViewModels.RealTimeTrading
                 ErrorMessage = $"Error stopping trading: {ex.Message}";
                 _logger.LogError(ex, "Error stopping trading service");
                 AddStatusMessage("Error: " + ErrorMessage);
+                SnackbarMessageQueue.Enqueue(ErrorMessage);
             }
             finally
             {
@@ -400,7 +421,8 @@ namespace AITrader.UI.ViewModels.RealTimeTrading
                 var marketState = _tradingService.GetCurrentMarketState();
                 if (marketState != null)
                 {
-                    LastTimestamp = marketState.Timestamp;
+                    Timestamp = marketState.Timestamp;
+                    LastTimestamp = marketState.Timestamp.ToString("HH:mm:ss.fff");
                     LastPrice = marketState.LastPrice;
                     CurrentPosition = marketState.CurrentPosition;
                     DataPointsAvailable = marketState.DataPointsAvailable;
@@ -452,7 +474,8 @@ namespace AITrader.UI.ViewModels.RealTimeTrading
             var timestamp = DateTime.Now.ToString("HH:mm:ss");
             var fullMessage = $"[{timestamp}] {message}";
 
-            App.Current.Dispatcher.Invoke(() =>
+            // Check if we're on the UI thread
+            if (App.Current.Dispatcher.CheckAccess())
             {
                 StatusMessages.Add(fullMessage);
 
@@ -461,7 +484,20 @@ namespace AITrader.UI.ViewModels.RealTimeTrading
                 {
                     StatusMessages.RemoveAt(0);
                 }
-            });
+            }
+            else
+            {
+                App.Current.Dispatcher.Invoke(() =>
+                {
+                    StatusMessages.Add(fullMessage);
+
+                    // Limit the number of messages
+                    while (StatusMessages.Count > 100)
+                    {
+                        StatusMessages.RemoveAt(0);
+                    }
+                });
+            }
         }
 
         // Command can execute methods
@@ -474,12 +510,16 @@ namespace AITrader.UI.ViewModels.RealTimeTrading
         /// </summary>
         public override void Dispose()
         {
-            _uiUpdateTimer.Stop();
+            // Stop the UI update timer
+            if (_uiUpdateTimer != null)
+            {
+                _uiUpdateTimer.Stop();
+            }
 
+            // Unsubscribe from events to avoid memory leaks
             if (_tradingService != null)
             {
                 _tradingService.StatusUpdated -= OnTradingServiceStatusUpdated;
-                _tradingService.Dispose();
             }
 
             base.Dispose();

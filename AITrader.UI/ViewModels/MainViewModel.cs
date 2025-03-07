@@ -231,7 +231,9 @@ namespace AITrader.UI.ViewModels
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Error inicializando BacktestingViewModel");
-                    throw;
+                    // En lugar de lanzar la excepción, manejamos el error como en RealTimeTradingViewModel
+                    MessageBox.Show($"Error durante la inicialización:\n{ex.Message}\n\nLa aplicación continuará en modo limitado.",
+                        "Error de inicialización", MessageBoxButton.OK, MessageBoxImage.Warning);
                 }
                 
                 // Actualizar la UI con el ViewModel
@@ -289,7 +291,9 @@ namespace AITrader.UI.ViewModels
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Error inicializando ModelTrainingViewModel");
-                    throw;
+                    // En lugar de lanzar la excepción, manejamos el error como en RealTimeTradingViewModel
+                    MessageBox.Show($"Error durante la inicialización:\n{ex.Message}\n\nLa aplicación continuará en modo limitado.",
+                        "Error de inicialización", MessageBoxButton.OK, MessageBoxImage.Warning);
                 }
                 
                 // Actualizar la UI con el ViewModel
@@ -347,7 +351,9 @@ namespace AITrader.UI.ViewModels
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Error inicializando SettingsViewModel");
-                    throw;
+                    // En lugar de lanzar la excepción, manejamos el error como en RealTimeTradingViewModel
+                    MessageBox.Show($"Error durante la inicialización:\n{ex.Message}\n\nLa aplicación continuará en modo limitado.",
+                        "Error de inicialización", MessageBoxButton.OK, MessageBoxImage.Warning);
                 }
                 
                 // Actualizar la UI con el ViewModel

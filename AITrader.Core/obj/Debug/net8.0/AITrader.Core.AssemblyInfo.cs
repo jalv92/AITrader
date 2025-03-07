@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("AITrader.Core")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+d77394e4e2d24b5239c745bd7f2ebe58a678f1da")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+7e252a13a4ab6ec8fc3ab74567b84e0c2073414b")]
 [assembly: System.Reflection.AssemblyProductAttribute("AITrader.Core")]
 [assembly: System.Reflection.AssemblyTitleAttribute("AITrader.Core")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

@@ -157,30 +157,8 @@ namespace AITrader.UI
                 var viewModel = _serviceProvider.GetRequiredService<MainViewModel>();
                 viewModel.Initialize();
                 
-                // Crear una ventana
-                var mainWindow = new Window
-                {
-                    Title = "AITrader - Sistema de Trading",
-                    Width = 1280,
-                    Height = 800,
-                    WindowStartupLocation = WindowStartupLocation.CenterScreen
-                };
-                
-                // Crear un ContentControl para mostrar el ViewModel actual
-                var contentControl = new System.Windows.Controls.ContentControl
-                {
-                    HorizontalAlignment = HorizontalAlignment.Stretch,
-                    VerticalAlignment = VerticalAlignment.Stretch
-                };
-                
-                // Vincular el ContentControl al CurrentView del ViewModel
-                contentControl.SetBinding(
-                    System.Windows.Controls.ContentControl.ContentProperty,
-                    new System.Windows.Data.Binding("CurrentView") { Source = viewModel }
-                );
-                
-                // Establecer el contenido de la ventana
-                mainWindow.Content = contentControl;
+                // Crear una instancia de MainWindow desde XAML
+                var mainWindow = new MainWindow();
                 
                 // Establecer el DataContext
                 mainWindow.DataContext = viewModel;

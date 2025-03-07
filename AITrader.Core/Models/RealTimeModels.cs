@@ -14,7 +14,7 @@ namespace AITrader.Core.Models
         public string MarketRegime { get; set; } = "Unknown";
         public double LastPrice { get; set; }
         public string LastTradeSignal { get; set; } = "NEUTRAL";
-        public string Timestamp { get; set; }
+        public DateTime Timestamp { get; set; }
         public string Symbol { get; set; }
         public double Bid { get; set; }
         public double Ask { get; set; }

@@ -5,12 +5,14 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
              xmlns:materialDesign="http://materialdesigninxaml.net/winfx/xaml/themes"
              xmlns:viewModels="clr-namespace:AITrader.UI.ViewModels.RealTimeTrading"
+             xmlns:converters="clr-namespace:AITrader.UI.Converters"
              mc:Ignorable="d" 
              d:DesignHeight="700" d:DesignWidth="1000"
              d:DataContext="{d:DesignInstance Type=viewModels:RealTimeTradingViewModel}">
     
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
+        <converters:BooleanToColorConverter x:Key="BooleanToColorConverter" />
         
         <Style x:Key="ConnectionIndicator" TargetType="Ellipse">
             <Setter Property="Width" Value="12" />
@@ -189,6 +191,6 @@
         <materialDesign:Snackbar Grid.Row="1" 
                                  HorizontalAlignment="Center" 
                                  VerticalAlignment="Bottom"
-                                 MessageQueue="{Binding ErrorMessageQueue}" />
+                                 MessageQueue="{Binding SnackbarMessageQueue}" />
     </Grid>
 </UserControl>
