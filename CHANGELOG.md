@@ -2,6 +2,32 @@
 
 All notable changes to the AITrader project will be documented in this file.
 
+## [2025-03-06] - Removal of Chart Functionality
+
+**Files Modified:**
+- AITrader.UI/ViewModels/RealTimeTrading/RealTimeTradingViewModel.cs
+- AITrader.UI.csproj
+
+**Files Removed:**
+- AITrader.UI/Models/OhlcPoint.cs
+
+*Removed all chart-related functionality from the application to streamline the real-time trading interface. Changes include removing the LiveCharts.Wpf package dependency, eliminating the OhlcPoint model class, refactoring the RealTimeTradingViewModel to remove chart update methods and properties, and fixing the Dispose method to properly override the base class implementation. These changes reduce complexity, eliminate unnecessary dependencies, and focus the application solely on trading functionality without chart visualization.*
+
+## [2025-03-06] - Enhanced Python Integration
+
+**Files Modified:**
+- AITrader.Core/Services/Python/PythonEngineService.cs
+- AITrader.Core/Models/OhlcPoint.cs
+
+*Enhanced the Python engine integration to better support required libraries for reinforcement learning. Improved the PythonEngineService to intelligently detect and utilize Python 3.13 installations with the necessary packages (pandas, stable-baselines3, gymnasium). Added support for user site-packages detection and prioritized path configuration. Created a custom OhlcPoint class to replace missing references from LiveCharts.Wpf. These improvements enable the application to properly access advanced Python libraries needed for the reinforcement learning components.*
+
+## [2025-03-06] - NinjaTrader Integration Documentation
+
+**Files Created:**
+- NinjaTrader Setup Guide.md
+
+*Added comprehensive documentation for integrating AITrader with NinjaTrader 8. The guide includes detailed instructions for installing and configuring the RLExecutor strategy, applying it to charts, testing the connection between AITrader and NinjaTrader, and troubleshooting common issues. This documentation supports the real-time trading implementation and provides users with clear steps to set up the trading environment.*
+
 ## [2025-03-06] - Implementation of Real-Time Trading Components
 
 **Files Created:**

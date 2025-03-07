@@ -5,8 +5,8 @@ using System.Threading.Tasks;
 using System.Windows.Input;
 using System.Windows.Threading;
 using Microsoft.Extensions.Logging;
+using AITrader.Core.Models;
 using AITrader.Core.Services.RealTimeTrading;
-using AITrader.UI.Models;
 using AITrader.UI.Commands;
 
 namespace AITrader.UI.ViewModels.RealTimeTrading
@@ -107,9 +107,6 @@ namespace AITrader.UI.ViewModels.RealTimeTrading
             set => SetProperty(ref _dataPointsAvailable, value);
         }
 
-        // Market data collection for chart
-        public ObservableCollection<MarketDataPointModel> MarketData { get; } = new ObservableCollection<MarketDataPointModel>();
-
         // Status messages
         private ObservableCollection<string> _statusMessages = new ObservableCollection<string>();
         public ObservableCollection<string> StatusMessages
@@ -126,7 +123,7 @@ namespace AITrader.UI.ViewModels.RealTimeTrading
             set => SetProperty(ref _isLoading, value);
         }
 
-        private string _errorMessage;
+        private string _errorMessage = string.Empty;
         public string ErrorMessage
         {
             get => _errorMessage;
@@ -144,54 +141,144 @@ namespace AITrader.UI.ViewModels.RealTimeTrading
             // Initialize commands
             StartTradingCommand = new AsyncRelayCommand(StartTradingAsync, CanStartTrading);
             StopTradingCommand = new AsyncRelayCommand(StopTradingAsync, CanStopTrading);
-            UpdateParametersCommand = new RelayCommand(UpdateTradingParameters, CanUpdateParameters);
+            UpdateParametersCommand = new AsyncRelayCommand(UpdateTradingParameters, CanUpdateParameters);
 
             // Initialize default values
             TradingEnabled = true;
             PositionSizing = 1.0;
             StopLossTicks = 10;
             TakeProfitTicks = 20;
+            IsLoading = false;
+            CurrentPositionText = "FLAT";
 
-            // Setup UI update timer
+            // Create UI update timer
             _uiUpdateTimer = new DispatcherTimer
             {
                 Interval = TimeSpan.FromSeconds(1)
             };
-            _uiUpdateTimer.Tick += UpdateUI;
-
-            // Subscribe to service events
-            _tradingService.StatusUpdated += OnTradingServiceStatusUpdated;
+            _uiUpdateTimer.Tick += (sender, e) => UpdateUI();
         }
 
         /// <summary>
         /// Initialize the ViewModel
         /// </summary>
-        public async Task InitializeAsync()
+        public override void Initialize()
+        {
+            base.Initialize();
+            
+            try
+            {
+                _logger.LogInformation("Inicializando RealTimeTradingViewModel");
+                
+                // En lugar de bloquear con GetAwaiter().GetResult(), iniciamos la inicialización
+                // de forma asíncrona para no bloquear el hilo principal de la UI
+                IsLoading = true;
+                AddStatusMessage("Initializing real-time trading module...");
+                
+                // Iniciamos la inicialización asíncrona sin bloquear
+                Task.Run(async () => {
+                    try
+                    {
+                        bool success = await InitializeAsync();
+                        
+                        if (!success)
+                        {
+                            _logger.LogWarning("La inicialización de RealTimeTradingViewModel no fue exitosa");
+                            // Actualizar la UI desde el hilo correcto
+                            App.Current.Dispatcher.Invoke(() => {
+                                ErrorMessage = "Inicialización incompleta. El sistema puede funcionar con capacidades limitadas.";
+                                AddStatusMessage("Error: " + ErrorMessage);
+                                IsLoading = false;
+                            });
+                        }
+                        else
+                        {
+                            _logger.LogInformation("RealTimeTradingViewModel inicializado correctamente");
+                            // Actualizar la UI desde el hilo correcto
+                            App.Current.Dispatcher.Invoke(() => {
+                                AddStatusMessage("Inicialización completada correctamente.");
+                                IsLoading = false;
+                            });
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error durante la inicialización asíncrona de RealTimeTradingViewModel");
+                        // Actualizar la UI desde el hilo correcto
+                        App.Current.Dispatcher.Invoke(() => {
+                            ErrorMessage = $"Error de inicialización: {ex.Message}";
+                            AddStatusMessage("Error: " + ErrorMessage);
+                            IsLoading = false;
+                        });
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error en Initialize() de RealTimeTradingViewModel");
+                ErrorMessage = $"Error de inicialización: {ex.Message}";
+                IsLoading = false;
+            }
+        }
+
+        /// <summary>
+        /// Initialize the ViewModel
+        /// </summary>
+        public async Task<bool> InitializeAsync()
         {
             if (_isInitialized)
-                return;
+                return true;
 
             try
             {
                 IsLoading = true;
-                AddStatusMessage("Initializing real-time trading service...");
+                AddStatusMessage("Initializing real-time trading module...");
 
-                bool initialized = await _tradingService.InitializeAsync();
-                if (!initialized)
+                // Initialize trading service - con manejo adicional de errores
+                bool success;
+                try
                 {
-                    ErrorMessage = "Failed to initialize real-time trading service";
-                    AddStatusMessage("Failed to initialize real-time trading service");
-                    return;
+                    _logger.LogInformation("Iniciando inicialización del servicio RealTimeTradingService");
+                    success = await _tradingService.InitializeAsync();
+                    _logger.LogInformation($"Inicialización del servicio RealTimeTradingService completada: {success}");
+                    
+                    if (!success)
+                    {
+                        ErrorMessage = "Failed to initialize trading service.";
+                        AddStatusMessage("Error: " + ErrorMessage);
+                        return false;
+                    }
+                }
+                catch (Exception svcEx)
+                {
+                    _logger.LogError(svcEx, "Error crítico al inicializar RealTimeTradingService");
+                    ErrorMessage = $"Error crítico al inicializar el servicio de trading: {svcEx.Message}";
+                    AddStatusMessage("Error crítico: " + ErrorMessage);
+                    // Continuamos con inicialización parcial en lugar de fallar completamente
+                    // para que la UI al menos sea visible
+                    success = false;
                 }
 
+                // Subscribe to trading service events
+                _tradingService.StatusUpdated += OnTradingServiceStatusUpdated;
+
+                // Set initial parameters
+                await UpdateTradingParameters();
+
                 _isInitialized = true;
-                AddStatusMessage("Real-time trading service initialized successfully");
+                AddStatusMessage("Real-time trading module initialized successfully.");
+
+                // Start UI update timer
+                _uiUpdateTimer.Start();
+
+                return true;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error initializing real-time trading ViewModel");
-                ErrorMessage = $"Error initializing: {ex.Message}";
-                AddStatusMessage($"Error initializing: {ex.Message}");
+                ErrorMessage = $"Error initializing view model: {ex.Message}";
+                _logger.LogError(ex, "Error initializing RealTimeTradingViewModel");
+                AddStatusMessage("Error: " + ErrorMessage);
+                return false;
             }
             finally
             {
@@ -207,32 +294,25 @@ namespace AITrader.UI.ViewModels.RealTimeTrading
             try
             {
                 IsLoading = true;
-                ErrorMessage = null;
-                AddStatusMessage("Starting real-time trading...");
+                AddStatusMessage("Starting real-time trading system...");
 
-                bool started = await _tradingService.StartAsync();
-                if (!started)
+                // Start the trading service
+                var success = await _tradingService.StartAsync();
+                if (!success)
                 {
-                    ErrorMessage = "Failed to start real-time trading";
-                    AddStatusMessage("Failed to start real-time trading");
+                    ErrorMessage = "Failed to start trading service.";
+                    AddStatusMessage("Error: " + ErrorMessage);
                     return;
                 }
 
                 _isServiceRunning = true;
-                AddStatusMessage("Real-time trading started successfully");
-
-                // Start UI update timer
-                _uiUpdateTimer.Start();
-
-                // Update command can execute status
-                (StartTradingCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
-                (StopTradingCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+                AddStatusMessage("Real-time trading system started.");
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error starting real-time trading");
-                ErrorMessage = $"Error starting: {ex.Message}";
-                AddStatusMessage($"Error starting: {ex.Message}");
+                ErrorMessage = $"Error starting trading: {ex.Message}";
+                _logger.LogError(ex, "Error starting trading service");
+                AddStatusMessage("Error: " + ErrorMessage);
             }
             finally
             {
@@ -248,29 +328,18 @@ namespace AITrader.UI.ViewModels.RealTimeTrading
             try
             {
                 IsLoading = true;
-                AddStatusMessage("Stopping real-time trading...");
+                AddStatusMessage("Stopping real-time trading system...");
 
+                // Stop the trading service
                 await _tradingService.StopAsync();
                 _isServiceRunning = false;
-                
-                // Stop UI update timer
-                _uiUpdateTimer.Stop();
-
-                AddStatusMessage("Real-time trading stopped");
-
-                // Reset connection status
-                IsDataConnected = false;
-                IsOrderConnected = false;
-
-                // Update command can execute status
-                (StartTradingCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
-                (StopTradingCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+                AddStatusMessage("Real-time trading system stopped.");
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error stopping real-time trading");
-                ErrorMessage = $"Error stopping: {ex.Message}";
-                AddStatusMessage($"Error stopping: {ex.Message}");
+                ErrorMessage = $"Error stopping trading: {ex.Message}";
+                _logger.LogError(ex, "Error stopping trading service");
+                AddStatusMessage("Error: " + ErrorMessage);
             }
             finally
             {
@@ -281,68 +350,75 @@ namespace AITrader.UI.ViewModels.RealTimeTrading
         /// <summary>
         /// Update trading parameters
         /// </summary>
-        private void UpdateTradingParameters()
+        private async Task UpdateTradingParameters()
         {
             try
             {
-                AddStatusMessage($"Updating trading parameters: enabled={TradingEnabled}, " +
-                               $"position_sizing={PositionSizing}, " +
-                               $"stop_loss={StopLossTicks}, " +
-                               $"take_profit={TakeProfitTicks}");
+                // Creamos un objeto de parámetros de trading
+                var parameters = new TradingParameters
+                {
+                    Instrument = "ES", // Por defecto usamos el E-mini S&P 500
+                    Quantity = (int)PositionSizing,
+                    StopLoss = StopLossTicks,
+                    TakeProfit = TakeProfitTicks
+                };
 
-                _tradingService.UpdateTradingParameters(
-                    TradingEnabled,
-                    PositionSizing,
-                    StopLossTicks,
-                    TakeProfitTicks);
+                // Update trading parameters
+                bool success = await _tradingService.UpdateTradingParameters(parameters);
 
-                AddStatusMessage("Trading parameters updated successfully");
+                if (success)
+                {
+                    AddStatusMessage($"Trading parameters updated: Enabled={TradingEnabled}, " +
+                        $"Position Size={PositionSizing}, " +
+                        $"Stop Loss={StopLossTicks} ticks, " +
+                        $"Take Profit={TakeProfitTicks} ticks");
+                }
+                else
+                {
+                    AddStatusMessage("Failed to update trading parameters");
+                }
             }
             catch (Exception ex)
             {
+                AddStatusMessage($"Error updating trading parameters: {ex.Message}");
                 _logger.LogError(ex, "Error updating trading parameters");
-                ErrorMessage = $"Error updating parameters: {ex.Message}";
-                AddStatusMessage($"Error updating parameters: {ex.Message}");
             }
         }
 
         /// <summary>
         /// Update UI from the trading service
         /// </summary>
-        private void UpdateUI(object sender, EventArgs e)
+        private void UpdateUI()
         {
             try
             {
-                // Get current market state
+                // Update connection status
+                IsDataConnected = _tradingService.IsDataConnected;
+                IsOrderConnected = _tradingService.IsOrderConnected;
+
+                // Update market data
                 var marketState = _tradingService.GetCurrentMarketState();
-
-                // Update UI properties
-                IsDataConnected = marketState.IsDataConnected;
-                IsOrderConnected = marketState.IsOrderConnected;
-                LastTimestamp = marketState.Timestamp;
-                LastPrice = marketState.LastPrice;
-                CurrentPosition = marketState.CurrentPosition;
-                DataPointsAvailable = marketState.DataPointsAvailable;
-
-                // Update position text
-                CurrentPositionText = CurrentPosition switch
+                if (marketState != null)
                 {
-                    1 => "LONG",
-                    -1 => "SHORT",
-                    _ => "FLAT"
-                };
+                    LastTimestamp = marketState.Timestamp;
+                    LastPrice = marketState.LastPrice;
+                    CurrentPosition = marketState.CurrentPosition;
+                    DataPointsAvailable = marketState.DataPointsAvailable;
 
-                // Fetch historical data for chart (limit updates to avoid UI freezing)
-                if (DateTime.Now.Second % 5 == 0) // Update every 5 seconds
-                {
-                    UpdateMarketDataChart();
-                }
+                    // Update position text
+                    CurrentPositionText = CurrentPosition switch
+                    {
+                        1 => "LONG",
+                        -1 => "SHORT",
+                        _ => "FLAT"
+                    };
 
-                // Check for errors
-                if (!string.IsNullOrEmpty(marketState.ErrorMessage))
-                {
-                    ErrorMessage = marketState.ErrorMessage;
-                    AddStatusMessage($"Error: {marketState.ErrorMessage}");
+                    // Check for errors
+                    if (!string.IsNullOrEmpty(marketState.ErrorMessage))
+                    {
+                        ErrorMessage = marketState.ErrorMessage;
+                        AddStatusMessage($"Error: {marketState.ErrorMessage}");
+                    }
                 }
             }
             catch (Exception ex)
@@ -353,70 +429,19 @@ namespace AITrader.UI.ViewModels.RealTimeTrading
         }
 
         /// <summary>
-        /// Update market data chart
-        /// </summary>
-        private void UpdateMarketDataChart()
-        {
-            try
-            {
-                var historicalData = _tradingService.GetHistoricalData();
-                if (historicalData == null || historicalData.Count == 0)
-                    return;
-
-                // Clear existing data and add new data
-                App.Current.Dispatcher.Invoke(() =>
-                {
-                    MarketData.Clear();
-                    foreach (var data in historicalData)
-                    {
-                        MarketData.Add(new MarketDataPointModel
-                        {
-                            Timestamp = data.Timestamp,
-                            Open = data.Open,
-                            High = data.High,
-                            Low = data.Low,
-                            Close = data.Close,
-                            Volume = data.Volume,
-                            Indicators = new Dictionary<string, double>(data.Indicators)
-                        });
-                    }
-                });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error updating market data chart");
-            }
-        }
-
-        /// <summary>
         /// Handle trading service status updates
         /// </summary>
-        private void OnTradingServiceStatusUpdated(object sender, RealTimeStatusEventArgs e)
+        private void OnTradingServiceStatusUpdated(object? sender, RealTimeStatusEventArgs e)
         {
-            try
-            {
-                // Update connection status
-                IsDataConnected = e.MarketState.IsDataConnected;
-                IsOrderConnected = e.MarketState.IsOrderConnected;
+            AddStatusMessage($"Status update: Data connected={e.IsDataConnected}, Order connected={e.IsOrderConnected}");
 
-                // Log connection status changes
-                if (IsDataConnected && IsOrderConnected)
-                {
-                    AddStatusMessage("Connected to NinjaTrader");
-                }
-                else if (!IsDataConnected && !IsOrderConnected)
-                {
-                    AddStatusMessage("Disconnected from NinjaTrader");
-                }
-                else
-                {
-                    AddStatusMessage($"Connection status: Data={IsDataConnected}, Order={IsOrderConnected}");
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error handling trading service status update");
-            }
+            // Update connection status
+            IsDataConnected = e.IsDataConnected;
+            IsOrderConnected = e.IsOrderConnected;
+
+            // Notify UI of property changes
+            OnPropertyChanged(nameof(IsDataConnected));
+            OnPropertyChanged(nameof(IsOrderConnected));
         }
 
         /// <summary>
@@ -424,25 +449,25 @@ namespace AITrader.UI.ViewModels.RealTimeTrading
         /// </summary>
         private void AddStatusMessage(string message)
         {
-            string timestamp = DateTime.Now.ToString("HH:mm:ss");
-            string formattedMessage = $"[{timestamp}] {message}";
+            var timestamp = DateTime.Now.ToString("HH:mm:ss");
+            var fullMessage = $"[{timestamp}] {message}";
 
             App.Current.Dispatcher.Invoke(() =>
             {
-                StatusMessages.Insert(0, formattedMessage);
+                StatusMessages.Add(fullMessage);
 
-                // Limit the number of messages to avoid memory issues
-                if (StatusMessages.Count > 100)
+                // Limit the number of messages
+                while (StatusMessages.Count > 100)
                 {
-                    StatusMessages.RemoveAt(StatusMessages.Count - 1);
+                    StatusMessages.RemoveAt(0);
                 }
             });
         }
 
         // Command can execute methods
-        private bool CanStartTrading() => _isInitialized && !_isServiceRunning && !IsLoading;
-        private bool CanStopTrading() => _isServiceRunning && !IsLoading;
-        private bool CanUpdateParameters() => _isInitialized && !IsLoading;
+        private bool CanStartTrading() => _isInitialized && !_isServiceRunning;
+        private bool CanStopTrading() => _isInitialized && _isServiceRunning;
+        private bool CanUpdateParameters() => _isInitialized;
 
         /// <summary>
         /// Clean up resources
@@ -450,58 +475,14 @@ namespace AITrader.UI.ViewModels.RealTimeTrading
         public override void Dispose()
         {
             _uiUpdateTimer.Stop();
-            _tradingService.StatusUpdated -= OnTradingServiceStatusUpdated;
+
+            if (_tradingService != null)
+            {
+                _tradingService.StatusUpdated -= OnTradingServiceStatusUpdated;
+                _tradingService.Dispose();
+            }
+
             base.Dispose();
         }
-    }
-
-    /// <summary>
-    /// Market data point model for UI
-    /// </summary>
-    public class MarketDataPointModel : ModelBase
-    {
-        private string _timestamp;
-        public string Timestamp
-        {
-            get => _timestamp;
-            set => SetProperty(ref _timestamp, value);
-        }
-
-        private double _open;
-        public double Open
-        {
-            get => _open;
-            set => SetProperty(ref _open, value);
-        }
-
-        private double _high;
-        public double High
-        {
-            get => _high;
-            set => SetProperty(ref _high, value);
-        }
-
-        private double _low;
-        public double Low
-        {
-            get => _low;
-            set => SetProperty(ref _low, value);
-        }
-
-        private double _close;
-        public double Close
-        {
-            get => _close;
-            set => SetProperty(ref _close, value);
-        }
-
-        private double _volume;
-        public double Volume
-        {
-            get => _volume;
-            set => SetProperty(ref _volume, value);
-        }
-
-        public Dictionary<string, double> Indicators { get; set; } = new Dictionary<string, double>();
     }
 }

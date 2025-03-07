@@ -1,0 +1,194 @@
+<UserControl x:Class="AITrader.UI.Views.RealTimeTrading.RealTimeTradingView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             xmlns:materialDesign="http://materialdesigninxaml.net/winfx/xaml/themes"
+             xmlns:viewModels="clr-namespace:AITrader.UI.ViewModels.RealTimeTrading"
+             mc:Ignorable="d" 
+             d:DesignHeight="700" d:DesignWidth="1000"
+             d:DataContext="{d:DesignInstance Type=viewModels:RealTimeTradingViewModel}">
+    
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+        
+        <Style x:Key="ConnectionIndicator" TargetType="Ellipse">
+            <Setter Property="Width" Value="12" />
+            <Setter Property="Height" Value="12" />
+            <Setter Property="Margin" Value="5,0,5,0" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsDataConnected}" Value="True">
+                    <Setter Property="Fill" Value="Green" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsDataConnected}" Value="False">
+                    <Setter Property="Fill" Value="Red" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        
+        <Style x:Key="PositionTextStyle" TargetType="TextBlock">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding CurrentPosition}" Value="1">
+                    <Setter Property="Foreground" Value="Green" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding CurrentPosition}" Value="-1">
+                    <Setter Property="Foreground" Value="Red" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding CurrentPosition}" Value="0">
+                    <Setter Property="Foreground" Value="Gray" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </UserControl.Resources>
+    
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        
+        <!-- Header -->
+        <materialDesign:Card Grid.Row="0" Margin="10" Padding="10">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="Real-Time Trading" Style="{StaticResource MaterialDesignHeadline5TextBlock}" />
+                    <materialDesign:Card Margin="15,0,0,0" Padding="10,5,10,5" Background="#f5f5f5">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="Data: " VerticalAlignment="Center" />
+                            <Ellipse Style="{StaticResource ConnectionIndicator}" />
+                            <TextBlock Text="Order: " VerticalAlignment="Center" Margin="10,0,0,0" />
+                            <Ellipse Style="{StaticResource ConnectionIndicator}" 
+                                     Fill="{Binding IsOrderConnected, Converter={StaticResource BooleanToColorConverter}, ConverterParameter='Green:Red'}" />
+                            <TextBlock Text="Position: " VerticalAlignment="Center" Margin="10,0,0,0" />
+                            <TextBlock Text="{Binding CurrentPositionText}" VerticalAlignment="Center" 
+                                       Style="{StaticResource PositionTextStyle}" FontWeight="Bold" />
+                        </StackPanel>
+                    </materialDesign:Card>
+                </StackPanel>
+                
+                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <Button Command="{Binding StartTradingCommand}" 
+                            Style="{StaticResource MaterialDesignRaisedButton}"
+                            Margin="5"
+                            ToolTip="Start real-time trading">
+                        <StackPanel Orientation="Horizontal">
+                            <materialDesign:PackIcon Kind="Play" Margin="0,0,5,0" />
+                            <TextBlock Text="Start" />
+                        </StackPanel>
+                    </Button>
+                    
+                    <Button Command="{Binding StopTradingCommand}" 
+                            Style="{StaticResource MaterialDesignOutlinedButton}"
+                            Margin="5"
+                            ToolTip="Stop real-time trading">
+                        <StackPanel Orientation="Horizontal">
+                            <materialDesign:PackIcon Kind="Stop" Margin="0,0,5,0" />
+                            <TextBlock Text="Stop" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+            </Grid>
+        </materialDesign:Card>
+        
+        <!-- Main Content -->
+        <Grid Grid.Row="1" Margin="10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            
+            <!-- Trading Parameters and Status Panel -->
+            <materialDesign:Card Padding="10">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    
+                    <!-- Trading Parameters -->
+                    <StackPanel Grid.Row="0">
+                        <TextBlock Text="Trading Parameters" 
+                                   Style="{StaticResource MaterialDesignHeadline6TextBlock}" 
+                                   Margin="0,0,0,10" />
+                        
+                        <CheckBox Content="Enable Trading" 
+                                  IsChecked="{Binding TradingEnabled}" 
+                                  Margin="0,5,0,5" />
+                        
+                        <TextBlock Text="Position Sizing" Margin="0,10,0,5" />
+                        <Slider Value="{Binding PositionSizing}" 
+                                Minimum="0.1" Maximum="5.0" 
+                                TickFrequency="0.1" 
+                                IsSnapToTickEnabled="True" />
+                        <TextBlock Text="{Binding PositionSizing, StringFormat=N1}" 
+                                   HorizontalAlignment="Right" />
+                        
+                        <TextBlock Text="Stop Loss (Ticks)" Margin="0,10,0,5" />
+                        <Slider Value="{Binding StopLossTicks}" 
+                                Minimum="1" Maximum="50" 
+                                TickFrequency="1" 
+                                IsSnapToTickEnabled="True" />
+                        <TextBlock Text="{Binding StopLossTicks}" 
+                                   HorizontalAlignment="Right" />
+                        
+                        <TextBlock Text="Take Profit (Ticks)" Margin="0,10,0,5" />
+                        <Slider Value="{Binding TakeProfitTicks}" 
+                                Minimum="1" Maximum="100" 
+                                TickFrequency="1" 
+                                IsSnapToTickEnabled="True" />
+                        <TextBlock Text="{Binding TakeProfitTicks}" 
+                                   HorizontalAlignment="Right" />
+                        
+                        <Button Command="{Binding UpdateParametersCommand}" 
+                                Content="Update Parameters" 
+                                Style="{StaticResource MaterialDesignRaisedButton}" 
+                                Margin="0,15,0,5" />
+                    </StackPanel>
+                    
+                    <!-- Status Messages -->
+                    <materialDesign:Card Grid.Row="1" Padding="10" Margin="0,10,0,0"
+                                         VerticalAlignment="Stretch">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <ItemsControl ItemsSource="{Binding StatusMessages}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding}" 
+                                                   TextWrapping="Wrap" 
+                                                   Margin="0,2,0,2" />
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </materialDesign:Card>
+                </Grid>
+            </materialDesign:Card>
+        </Grid>
+        
+        <!-- Loading Overlay -->
+        <Grid Grid.Row="0" Grid.RowSpan="2" 
+              Background="#80000000" 
+              Visibility="{Binding IsLoading, Converter={StaticResource BoolToVis}}">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                <ProgressBar Style="{StaticResource MaterialDesignCircularProgressBar}" 
+                             Value="0" 
+                             IsIndeterminate="True" 
+                             Width="50" 
+                             Height="50" />
+                <TextBlock Text="Loading..." 
+                           Foreground="White" 
+                           Margin="0,10,0,0" 
+                           HorizontalAlignment="Center" />
+            </StackPanel>
+        </Grid>
+        
+        <!-- Error Message -->
+        <materialDesign:Snackbar Grid.Row="1" 
+                                 HorizontalAlignment="Center" 
+                                 VerticalAlignment="Bottom"
+                                 MessageQueue="{Binding ErrorMessageQueue}" />
+    </Grid>
+</UserControl>

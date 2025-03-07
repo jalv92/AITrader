@@ -1,0 +1,15 @@
+C:\Users\javlo\Documents\Code Projects\AITrader\TestWpfApp\bin\Debug\net8.0-windows\TestWpfApp.exe
+C:\Users\javlo\Documents\Code Projects\AITrader\TestWpfApp\bin\Debug\net8.0-windows\TestWpfApp.deps.json
+C:\Users\javlo\Documents\Code Projects\AITrader\TestWpfApp\bin\Debug\net8.0-windows\TestWpfApp.runtimeconfig.json
+C:\Users\javlo\Documents\Code Projects\AITrader\TestWpfApp\bin\Debug\net8.0-windows\TestWpfApp.dll
+C:\Users\javlo\Documents\Code Projects\AITrader\TestWpfApp\bin\Debug\net8.0-windows\TestWpfApp.pdb
+C:\Users\javlo\Documents\Code Projects\AITrader\TestWpfApp\obj\Debug\net8.0-windows\TestWpfApp.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\javlo\Documents\Code Projects\AITrader\TestWpfApp\obj\Debug\net8.0-windows\TestWpfApp.AssemblyInfoInputs.cache
+C:\Users\javlo\Documents\Code Projects\AITrader\TestWpfApp\obj\Debug\net8.0-windows\TestWpfApp.AssemblyInfo.cs
+C:\Users\javlo\Documents\Code Projects\AITrader\TestWpfApp\obj\Debug\net8.0-windows\TestWpfApp.csproj.CoreCompileInputs.cache
+C:\Users\javlo\Documents\Code Projects\AITrader\TestWpfApp\obj\Debug\net8.0-windows\TestWpfApp.sourcelink.json
+C:\Users\javlo\Documents\Code Projects\AITrader\TestWpfApp\obj\Debug\net8.0-windows\TestWpfApp.dll
+C:\Users\javlo\Documents\Code Projects\AITrader\TestWpfApp\obj\Debug\net8.0-windows\refint\TestWpfApp.dll
+C:\Users\javlo\Documents\Code Projects\AITrader\TestWpfApp\obj\Debug\net8.0-windows\TestWpfApp.pdb
+C:\Users\javlo\Documents\Code Projects\AITrader\TestWpfApp\obj\Debug\net8.0-windows\TestWpfApp.genruntimeconfig.cache
+C:\Users\javlo\Documents\Code Projects\AITrader\TestWpfApp\obj\Debug\net8.0-windows\ref\TestWpfApp.dll

@@ -1,0 +1,777 @@
+"""
+NinjaTrader Socket Client Module
+
+This module implements the socket client that communicates with the NinjaTrader 8
+RLExecutor strategy via TCP sockets for real-time market data and trading signals.
+"""
+
+import socket
+import threading
+import time
+import queue
+import logging
+import select
+from typing import Dict, List, Tuple, Optional, Union, Callable
+import numpy as np
+
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+
+class NinjaTraderSocketClient:
+    """
+    Socket client for communicating with NinjaTrader 8 RLExecutor strategy.
+    
+    This client manages two socket connections:
+    1. Data Socket: Receives real-time market data
+    2. Order Socket: Sends trading signals and receives order confirmations
+    """
+    
+    def __init__(self, 
+                 data_host: str = "127.0.0.1", 
+                 data_port: int = 5000,
+                 order_host: str = "127.0.0.1", 
+                 order_port: int = 5001,
+                 reconnect_delay: int = 5,
+                 max_reconnect_attempts: int = 10):
+        """
+        Initialize the NinjaTrader socket client.
+        
+        Parameters:
+        -----------
+        data_host : str
+            Host for the data socket connection
+        data_port : int
+            Port for the data socket connection
+        order_host : str
+            Host for the order socket connection
+        order_port : int
+            Port for the order socket connection
+        reconnect_delay : int
+            Delay in seconds between reconnection attempts
+        max_reconnect_attempts : int
+            Maximum number of reconnection attempts before giving up
+        """
+        # Socket connection parameters
+        self.data_host = data_host
+        self.data_port = data_port
+        self.order_host = order_host
+        self.order_port = order_port
+        self.reconnect_delay = reconnect_delay
+        self.max_reconnect_attempts = max_reconnect_attempts
+        
+        # Socket connections
+        self.data_socket: Optional[socket.socket] = None
+        self.order_socket: Optional[socket.socket] = None
+        
+        # Connection state
+        self.data_connected = False
+        self.order_connected = False
+        self.running = False
+        
+        # Threads
+        self.data_thread: Optional[threading.Thread] = None
+        self.order_thread: Optional[threading.Thread] = None
+        self.heartbeat_thread: Optional[threading.Thread] = None
+        
+        # Message queues
+        self.data_queue = queue.Queue()
+        self.order_queue = queue.Queue()
+        self.send_queue = queue.Queue()
+        
+        # Reconnection counters
+        self.data_reconnect_attempts = 0
+        self.order_reconnect_attempts = 0
+        
+        # Callbacks
+        self.on_data_received: Optional[Callable[[str], None]] = None
+        self.on_order_confirmation: Optional[Callable[[str], None]] = None
+        self.on_connection_status_changed: Optional[Callable[[bool, bool], None]] = None
+        
+        # Last heartbeat times
+        self.last_data_heartbeat = time.time()
+        self.last_order_heartbeat = time.time()
+        
+        # Data processing settings
+        self.buffer_size = 4096
+        self.terminator = '\n'
+        
+        # Lock for thread-safe socket operations
+        self.socket_lock = threading.Lock()
+    
+    def start(self) -> bool:
+        """
+        Start the socket client and connect to NinjaTrader.
+        
+        Returns:
+        --------
+        bool
+            True if both connections started successfully, False otherwise
+        """
+        self.running = True
+        data_started = self._start_data_connection()
+        order_started = self._start_order_connection()
+        
+        # Start heartbeat thread
+        self.heartbeat_thread = threading.Thread(target=self._heartbeat_loop, daemon=True)
+        self.heartbeat_thread.start()
+        
+        return data_started and order_started
+    
+    def stop(self) -> None:
+        """
+        Stop the socket client and close all connections.
+        """
+        self.running = False
+        
+        # Close data socket
+        if self.data_socket:
+            try:
+                self.data_socket.shutdown(socket.SHUT_RDWR)
+                self.data_socket.close()
+            except Exception as e:
+                logger.error(f"Error closing data socket: {e}")
+            self.data_socket = None
+            self.data_connected = False
+        
+        # Close order socket
+        if self.order_socket:
+            try:
+                self.order_socket.shutdown(socket.SHUT_RDWR)
+                self.order_socket.close()
+            except Exception as e:
+                logger.error(f"Error closing order socket: {e}")
+            self.order_socket = None
+            self.order_connected = False
+        
+        # Wait for threads to terminate
+        if self.data_thread and self.data_thread.is_alive():
+            self.data_thread.join(2)
+        
+        if self.order_thread and self.order_thread.is_alive():
+            self.order_thread.join(2)
+        
+        if self.heartbeat_thread and self.heartbeat_thread.is_alive():
+            self.heartbeat_thread.join(2)
+        
+        logger.info("Socket client stopped")
+    
+    def send_trading_signal(self, signal: int, ema_choice: int, position_size: float, 
+                           stop_loss: float, take_profit: float) -> bool:
+        """
+        Send a trading signal to NinjaTrader.
+        
+        Parameters:
+        -----------
+        signal : int
+            Trading signal (-1 = short, 0 = flat, 1 = long)
+        ema_choice : int
+            EMA choice for the strategy (0 = none, 1 = short, 2 = long)
+        position_size : float
+            Position size multiplier (1.0 = base size)
+        stop_loss : float
+            Stop loss in ticks
+        take_profit : float
+            Take profit in ticks
+            
+        Returns:
+        --------
+        bool
+            True if signal was sent successfully, False otherwise
+        """
+        if not self.order_connected:
+            logger.error("Cannot send trading signal - order socket not connected")
+            return False
+        
+        # Format trading signal
+        message = f"{signal},{ema_choice},{position_size},{stop_loss},{take_profit}\n"
+        
+        # Add to send queue
+        self.send_queue.put(message)
+        logger.info(f"Enqueued trading signal: {message.strip()}")
+        
+        return True
+    
+    def get_last_market_data(self) -> Optional[Dict]:
+        """
+        Get the last received market data.
+        
+        Returns:
+        --------
+        Optional[Dict]
+            Last market data or None if no data received
+        """
+        if self.data_queue.empty():
+            return None
+        
+        # Get the most recent data
+        try:
+            return self.data_queue.get_nowait()
+        except queue.Empty:
+            return None
+    
+    def get_last_order_confirmation(self) -> Optional[Dict]:
+        """
+        Get the last order confirmation.
+        
+        Returns:
+        --------
+        Optional[Dict]
+            Last order confirmation or None if no confirmation received
+        """
+        if self.order_queue.empty():
+            return None
+        
+        # Get the most recent confirmation
+        try:
+            return self.order_queue.get_nowait()
+        except queue.Empty:
+            return None
+    
+    def register_data_callback(self, callback: Callable[[Dict], None]) -> None:
+        """
+        Register a callback function for received market data.
+        
+        Parameters:
+        -----------
+        callback : Callable[[Dict], None]
+            Function to call when new market data is received
+        """
+        self.on_data_received = callback
+    
+    def register_order_callback(self, callback: Callable[[Dict], None]) -> None:
+        """
+        Register a callback function for order confirmations.
+        
+        Parameters:
+        -----------
+        callback : Callable[[Dict], None]
+            Function to call when an order confirmation is received
+        """
+        self.on_order_confirmation = callback
+    
+    def register_connection_callback(self, callback: Callable[[bool, bool], None]) -> None:
+        """
+        Register a callback function for connection status changes.
+        
+        Parameters:
+        -----------
+        callback : Callable[[bool, bool], None]
+            Function to call when connection status changes (data_connected, order_connected)
+        """
+        self.on_connection_status_changed = callback
+    
+    def is_connected(self) -> Tuple[bool, bool]:
+        """
+        Check connection status.
+        
+        Returns:
+        --------
+        Tuple[bool, bool]
+            (data_connected, order_connected)
+        """
+        return self.data_connected, self.order_connected
+    
+    #region Private methods
+    def _start_data_connection(self) -> bool:
+        """
+        Start the data socket connection.
+        
+        Returns:
+        --------
+        bool
+            True if connection started successfully, False otherwise
+        """
+        try:
+            self.data_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.data_socket.settimeout(10)
+            logger.info(f"Connecting to data server at {self.data_host}:{self.data_port}")
+            
+            # Connect to data server
+            self.data_socket.connect((self.data_host, self.data_port))
+            self.data_connected = True
+            self.data_reconnect_attempts = 0
+            
+            # Start data processing thread
+            self.data_thread = threading.Thread(target=self._data_loop, daemon=True)
+            self.data_thread.start()
+            
+            # Notify
+            logger.info("Connected to data server")
+            self._notify_connection_status()
+            
+            return True
+        except Exception as e:
+            logger.error(f"Failed to connect to data server: {e}")
+            self.data_connected = False
+            self._notify_connection_status()
+            return False
+    
+    def _start_order_connection(self) -> bool:
+        """
+        Start the order socket connection.
+        
+        Returns:
+        --------
+        bool
+            True if connection started successfully, False otherwise
+        """
+        try:
+            self.order_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.order_socket.settimeout(10)
+            logger.info(f"Connecting to order server at {self.order_host}:{self.order_port}")
+            
+            # Connect to order server
+            self.order_socket.connect((self.order_host, self.order_port))
+            self.order_connected = True
+            self.order_reconnect_attempts = 0
+            
+            # Start order processing thread
+            self.order_thread = threading.Thread(target=self._order_loop, daemon=True)
+            self.order_thread.start()
+            
+            # Notify
+            logger.info("Connected to order server")
+            self._notify_connection_status()
+            
+            return True
+        except Exception as e:
+            logger.error(f"Failed to connect to order server: {e}")
+            self.order_connected = False
+            self._notify_connection_status()
+            return False
+    
+    def _data_loop(self) -> None:
+        """
+        Main loop for processing data socket messages.
+        """
+        buffer = ""
+        
+        while self.running and self.data_connected:
+            try:
+                # Receive data
+                data = self.data_socket.recv(self.buffer_size)
+                
+                if not data:
+                    # Connection closed by server
+                    logger.warning("Data server closed connection")
+                    self._handle_data_disconnect()
+                    break
+                
+                # Decode data and add to buffer
+                buffer += data.decode('ascii')
+                
+                # Process complete messages
+                while self.terminator in buffer:
+                    terminator_idx = buffer.find(self.terminator)
+                    message = buffer[:terminator_idx].strip()
+                    buffer = buffer[terminator_idx + len(self.terminator):]
+                    
+                    # Process message
+                    self._process_data_message(message)
+                    
+            except socket.timeout:
+                # Socket timeout, check if still connected
+                if time.time() - self.last_data_heartbeat > 15:
+                    logger.warning("Data connection timed out")
+                    self._handle_data_disconnect()
+                    break
+                
+            except Exception as e:
+                logger.error(f"Error in data loop: {e}")
+                self._handle_data_disconnect()
+                break
+        
+        logger.info("Data loop terminated")
+    
+    def _order_loop(self) -> None:
+        """
+        Main loop for processing order socket messages.
+        """
+        buffer = ""
+        
+        while self.running and self.order_connected:
+            try:
+                # Check for messages to send
+                while not self.send_queue.empty() and self.order_connected:
+                    try:
+                        message = self.send_queue.get_nowait()
+                        self._send_order_message(message)
+                    except queue.Empty:
+                        break
+                    except Exception as e:
+                        logger.error(f"Error sending order message: {e}")
+                
+                # Check if socket is readable
+                ready_to_read, _, _ = select.select([self.order_socket], [], [], 0.1)
+                
+                if not ready_to_read:
+                    continue
+                
+                # Receive data
+                data = self.order_socket.recv(self.buffer_size)
+                
+                if not data:
+                    # Connection closed by server
+                    logger.warning("Order server closed connection")
+                    self._handle_order_disconnect()
+                    break
+                
+                # Decode data and add to buffer
+                buffer += data.decode('ascii')
+                
+                # Process complete messages
+                while self.terminator in buffer:
+                    terminator_idx = buffer.find(self.terminator)
+                    message = buffer[:terminator_idx].strip()
+                    buffer = buffer[terminator_idx + len(self.terminator):]
+                    
+                    # Process message
+                    self._process_order_message(message)
+                    
+            except socket.timeout:
+                # Socket timeout, check if still connected
+                if time.time() - self.last_order_heartbeat > 15:
+                    logger.warning("Order connection timed out")
+                    self._handle_order_disconnect()
+                    break
+                
+            except Exception as e:
+                logger.error(f"Error in order loop: {e}")
+                self._handle_order_disconnect()
+                break
+        
+        logger.info("Order loop terminated")
+    
+    def _heartbeat_loop(self) -> None:
+        """
+        Loop for sending periodic heartbeats to maintain connections.
+        """
+        while self.running:
+            # Send heartbeats
+            if self.data_connected:
+                try:
+                    self._send_data_message("PING\n")
+                except Exception as e:
+                    logger.error(f"Error sending data heartbeat: {e}")
+                    self._handle_data_disconnect()
+            
+            if self.order_connected:
+                try:
+                    self._send_order_message("PING\n")
+                except Exception as e:
+                    logger.error(f"Error sending order heartbeat: {e}")
+                    self._handle_order_disconnect()
+            
+            # Sleep for 5 seconds
+            time.sleep(5)
+    
+    def _process_data_message(self, message: str) -> None:
+        """
+        Process a message from the data socket.
+        
+        Parameters:
+        -----------
+        message : str
+            Message received from the data socket
+        """
+        # Ignore heartbeat responses
+        if message == "PONG":
+            self.last_data_heartbeat = time.time()
+            return
+        
+        # Update heartbeat time for any message
+        self.last_data_heartbeat = time.time()
+        
+        # Handle server ready message
+        if message == "SERVER_READY":
+            logger.info("Data server is ready")
+            # Send connection info
+            self._send_data_message("CONNECT:PythonRLAgent\n")
+            return
+        
+        # Handle server info message
+        if message.startswith("SERVER_INFO:"):
+            parts = message.split(":")
+            if len(parts) > 1:
+                logger.info(f"Server info: {':'.join(parts[1:])}")
+            return
+        
+        # Process market data
+        try:
+            # Parse market data (format depends on RLExecutor implementation)
+            # Example format: "MARKET_DATA:timestamp,open,high,low,close,volume,..."
+            parsed_data = self._parse_market_data(message)
+            
+            if parsed_data:
+                # Add to queue
+                self.data_queue.put(parsed_data)
+                
+                # Notify callback if registered
+                if self.on_data_received:
+                    self.on_data_received(parsed_data)
+        except Exception as e:
+            logger.error(f"Error processing data message '{message}': {e}")
+    
+    def _process_order_message(self, message: str) -> None:
+        """
+        Process a message from the order socket.
+        
+        Parameters:
+        -----------
+        message : str
+            Message received from the order socket
+        """
+        # Ignore heartbeat responses
+        if message == "PONG":
+            self.last_order_heartbeat = time.time()
+            return
+        
+        # Update heartbeat time for any message
+        self.last_order_heartbeat = time.time()
+        
+        # Handle server ready message
+        if message == "ORDER_SERVER_READY":
+            logger.info("Order server is ready")
+            return
+        
+        # Handle order confirmations
+        if message.startswith("ORDER_CONFIRMED:"):
+            parts = message.split(":")
+            if len(parts) > 1:
+                # Example: ORDER_CONFIRMED:1,2,1.5
+                confirmation_data = self._parse_order_confirmation(parts[1])
+                logger.info(f"Order confirmed: {confirmation_data}")
+                
+                # Add to queue
+                self.order_queue.put(confirmation_data)
+                
+                # Notify callback if registered
+                if self.on_order_confirmation:
+                    self.on_order_confirmation(confirmation_data)
+            return
+        
+        # Handle trade execution data
+        if message.startswith("TRADE_EXECUTED:"):
+            parts = message.split(":")
+            if len(parts) > 1:
+                # Example: TRADE_EXECUTED:Exit Long,100.25,101.50,125.0,1
+                execution_data = self._parse_trade_execution(parts[1])
+                logger.info(f"Trade executed: {execution_data}")
+                
+                # Add to queue
+                self.order_queue.put(execution_data)
+                
+                # Notify callback if registered
+                if self.on_order_confirmation:
+                    self.on_order_confirmation(execution_data)
+            return
+        
+        # Handle errors
+        if message.startswith("ERROR:"):
+            parts = message.split(":")
+            if len(parts) > 1:
+                error_message = parts[1]
+                logger.error(f"Order server error: {error_message}")
+            return
+        
+        # Log unknown messages
+        logger.warning(f"Unknown order message: {message}")
+    
+    def _parse_market_data(self, message: str) -> Optional[Dict]:
+        """
+        Parse a market data message.
+        
+        Parameters:
+        -----------
+        message : str
+            Market data message
+            
+        Returns:
+        --------
+        Optional[Dict]
+            Parsed market data or None if invalid
+        """
+        # This implementation depends on the exact format sent by RLExecutor
+        # Adjust according to the actual format
+        
+        # Example implementation assuming format: "MARKET_DATA:timestamp,open,high,low,close,volume,..."
+        if not message.startswith("MARKET_DATA:"):
+            return None
+        
+        try:
+            data_str = message[len("MARKET_DATA:"):]
+            values = data_str.split(",")
+            
+            # Adjust the parsing logic based on the actual format
+            data = {
+                "timestamp": values[0],
+                "open": float(values[1]),
+                "high": float(values[2]),
+                "low": float(values[3]),
+                "close": float(values[4]),
+                "volume": float(values[5])
+            }
+            
+            # Add additional fields if available
+            if len(values) > 6:
+                for i, value in enumerate(values[6:]):
+                    data[f"indicator_{i}"] = float(value)
+            
+            return data
+        except Exception as e:
+            logger.error(f"Error parsing market data '{message}': {e}")
+            return None
+    
+    def _parse_order_confirmation(self, data_str: str) -> Dict:
+        """
+        Parse an order confirmation message.
+        
+        Parameters:
+        -----------
+        data_str : str
+            Order confirmation data string
+            
+        Returns:
+        --------
+        Dict
+            Parsed order confirmation
+        """
+        # Example: "1,2,1.5" = signal,emaChoice,positionSize
+        try:
+            values = data_str.split(",")
+            return {
+                "type": "order_confirmation",
+                "signal": int(values[0]),
+                "ema_choice": int(values[1]),
+                "position_size": float(values[2])
+            }
+        except Exception as e:
+            logger.error(f"Error parsing order confirmation '{data_str}': {e}")
+            return {"type": "error", "message": f"Parse error: {str(e)}"}
+    
+    def _parse_trade_execution(self, data_str: str) -> Dict:
+        """
+        Parse a trade execution message.
+        
+        Parameters:
+        -----------
+        data_str : str
+            Trade execution data string
+            
+        Returns:
+        --------
+        Dict
+            Parsed trade execution
+        """
+        # Example: "Exit Long,100.25,101.50,125.0,1" = action,entryPrice,exitPrice,pnl,quantity
+        try:
+            values = data_str.split(",")
+            return {
+                "type": "trade_execution",
+                "action": values[0],
+                "entry_price": float(values[1]) if values[1] else 0.0,
+                "exit_price": float(values[2]) if values[2] else 0.0,
+                "pnl": float(values[3]),
+                "quantity": int(values[4])
+            }
+        except Exception as e:
+            logger.error(f"Error parsing trade execution '{data_str}': {e}")
+            return {"type": "error", "message": f"Parse error: {str(e)}"}
+    
+    def _send_data_message(self, message: str) -> None:
+        """
+        Send a message to the data socket.
+        
+        Parameters:
+        -----------
+        message : str
+            Message to send
+        """
+        if not self.data_connected or not self.data_socket:
+            logger.warning("Cannot send data message - not connected")
+            return
+        
+        with self.socket_lock:
+            self.data_socket.sendall(message.encode('ascii'))
+    
+    def _send_order_message(self, message: str) -> None:
+        """
+        Send a message to the order socket.
+        
+        Parameters:
+        -----------
+        message : str
+            Message to send
+        """
+        if not self.order_connected or not self.order_socket:
+            logger.warning("Cannot send order message - not connected")
+            return
+        
+        with self.socket_lock:
+            self.order_socket.sendall(message.encode('ascii'))
+    
+    def _handle_data_disconnect(self) -> None:
+        """
+        Handle a data socket disconnection.
+        """
+        self.data_connected = False
+        self._notify_connection_status()
+        
+        # Clean up socket
+        if self.data_socket:
+            try:
+                self.data_socket.close()
+            except:
+                pass
+            self.data_socket = None
+        
+        # Attempt reconnection if running
+        if self.running and self.data_reconnect_attempts < self.max_reconnect_attempts:
+            self.data_reconnect_attempts += 1
+            logger.info(f"Attempting data reconnection ({self.data_reconnect_attempts}/{self.max_reconnect_attempts})")
+            
+            # Wait before reconnecting
+            time.sleep(self.reconnect_delay)
+            
+            # Reconnect
+            self._start_data_connection()
+        else:
+            logger.error("Max data reconnection attempts reached or client stopped")
+    
+    def _handle_order_disconnect(self) -> None:
+        """
+        Handle an order socket disconnection.
+        """
+        self.order_connected = False
+        self._notify_connection_status()
+        
+        # Clean up socket
+        if self.order_socket:
+            try:
+                self.order_socket.close()
+            except:
+                pass
+            self.order_socket = None
+        
+        # Attempt reconnection if running
+        if self.running and self.order_reconnect_attempts < self.max_reconnect_attempts:
+            self.order_reconnect_attempts += 1
+            logger.info(f"Attempting order reconnection ({self.order_reconnect_attempts}/{self.max_reconnect_attempts})")
+            
+            # Wait before reconnecting
+            time.sleep(self.reconnect_delay)
+            
+            # Reconnect
+            self._start_order_connection()
+        else:
+            logger.error("Max order reconnection attempts reached or client stopped")
+    
+    def _notify_connection_status(self) -> None:
+        """
+        Notify about connection status changes.
+        """
+        if self.on_connection_status_changed:
+            self.on_connection_status_changed(self.data_connected, self.order_connected)
+    #endregion

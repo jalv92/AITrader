@@ -1,0 +1,30 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "AITrader.Core", "AITrader.Core\AITrader.Core.csproj", "{FB42A69A-0AB7-4E44-8E7A-1E0C54B0A1A0}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "AITrader.UI", "AITrader.UI\AITrader.UI.csproj", "{8E03FD1E-5837-4F41-B37C-9A8D83A4D0B9}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{FB42A69A-0AB7-4E44-8E7A-1E0C54B0A1A0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FB42A69A-0AB7-4E44-8E7A-1E0C54B0A1A0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FB42A69A-0AB7-4E44-8E7A-1E0C54B0A1A0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FB42A69A-0AB7-4E44-8E7A-1E0C54B0A1A0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8E03FD1E-5837-4F41-B37C-9A8D83A4D0B9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8E03FD1E-5837-4F41-B37C-9A8D83A4D0B9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8E03FD1E-5837-4F41-B37C-9A8D83A4D0B9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8E03FD1E-5837-4F41-B37C-9A8D83A4D0B9}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {F93C3A0F-DA0A-4E3E-8C42-3A1B948D72F2}
+	EndGlobalSection
+EndGlobal
